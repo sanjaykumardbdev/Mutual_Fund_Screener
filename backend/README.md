@@ -1,11 +1,12 @@
-# Spring Boot API - Phases 2 through 6
+# Spring Boot API - Phases 2 through 8
 
 This Java 17 / Spring Boot 3 API connects to the Oracle 19c schema. It provides
 health, authenticated fund catalog/NAV reads, session authentication,
 authorization, admin, watchlist, and investment APIs. The React fund explorer
 is documented in the sibling `frontend` folder. It imports mapped daily NAV
-data from AMFI, retains dated history, and provides NAV dashboard and detail
-data.
+data from AMFI, retains dated history, and provides NAV dashboard/detail,
+offline synchronization preferences, watchlist/investment, SIP, and
+user-scoped portfolio analytics APIs.
 
 ## Requirements
 
@@ -17,16 +18,21 @@ data.
 - The Phase 3 security migration in
   `Mutual_Fund_DB/03_phase3_security_migration.sql` applied to existing
   databases. Fresh installs already include the new permission policy column.
+- Existing databases must also apply
+  `Mutual_Fund_DB/04_phase8_offline_investment_migration.sql` once before
+  recording Phase 8 transactions. Fresh installs already contain its
+  idempotency column/index.
 
 ## Configure and run (Windows PowerShell)
 
 Start Oracle 19c and verify that the PDB is open. In a new PowerShell window,
-apply the Phase 3 migration first (if this database was installed before
-Phase 3), then start the backend:
+apply required one-time migrations first, then start the backend:
 
 1. Connect as `MUTUAL_FUND_APP` to the same PDB in SQL Developer.
-2. Open `Mutual_Fund_DB\03_phase3_security_migration.sql` and run it once with
-   **Run Script (F5)**. Do not run it again after it succeeds.
+2. Open and run each required migration once with **Run Script (F5)**:
+   `Mutual_Fund_DB\03_phase3_security_migration.sql` (older databases) and
+   `Mutual_Fund_DB\04_phase8_offline_investment_migration.sql` (existing
+   databases). Do not rerun a migration after it succeeds.
 3. If this is the first application user, set the bootstrap username/email
    in PowerShell before starting the API:
 
@@ -157,12 +163,34 @@ POST   /api/me/watchlist/{schemeId}
 DELETE /api/me/watchlist/{schemeId}
 GET    /api/me/investments
 POST   /api/me/investments
+GET    /api/me/portfolio
+GET    /api/me/sips
+POST   /api/me/sips
+PATCH  /api/me/sips/{sipId}/status
+GET    /api/me/preferences
+PUT    /api/me/preferences
 ```
 
 Watchlist operations reactivate or soft-remove the caller's unique
 user/scheme row. Investment transactions are created and listed only for the
 authenticated user. SIP transactions must reference a SIP belonging to that
 same user and scheme. The records are not editable/deletable by these APIs.
+
+Investment transaction POST bodies accept an optional UUID `clientRequestId`.
+The browser supplies it for offline queue replay; a repeated key from the same
+user and identical transaction is idempotent. The additive Phase 8 migration
+is required on databases installed before this feature.
+
+Portfolio analytics group the caller's investment ledger by scheme. Units held
+equal purchase/SIP units less redemption units; current value uses the latest
+stored NAV. Absolute gain/loss is current value plus redemption proceeds and
+IDCW payouts less recorded contributions. Returns are not annualized and do
+not include unrecorded cash flows, taxes, or fees. This is informational
+tracking, not tax or investment advice.
+
+SIP plan APIs manage the user's schedule and status only. They do not place
+orders, move money, or automatically generate installment transactions;
+record each installment explicitly through the investment transaction API.
 
 ### Admin APIs
 
@@ -298,6 +326,27 @@ refresh status. Fund details expose latest NAV and historical records. The
 frontend refresh control is shown to ADMIN-role accounts only; API
 authorization is independently enforced.
 
+### Offline and automatic synchronization
+
+The production frontend caches its static application shell with a service
+worker and caches authenticated GET responses in IndexedDB under the signed-in
+user ID. Retention uses the user's `offline_cache_days` preference. A prior
+successful sign-in is required before offline reload can identify the local
+workspace; cached identity is only a local-device convenience and does not
+authenticate server requests.
+
+Watchlist add/remove and investment transaction writes are queued offline.
+Queued transactions carry a per-user UUID idempotency key and replay in order
+after connectivity returns, using the normal session and CSRF protections.
+Changes that fail server validation are retained as failed outbox entries; the
+user must resolve them while online. SIP plan changes and administrative NAV
+refresh require an online request and are not queued. Signing out clears that
+user's local cached data and queued writes after confirmation.
+
+The app also refreshes visible data on reconnect/focus and at the preference's
+refresh interval. This refreshes reads; it does not fetch provider NAV itself.
+AMFI NAV ingestion remains a separate backend daily schedule and admin action.
+
 Example PowerShell probe:
 
 ```powershell
@@ -311,7 +360,8 @@ Invoke-RestMethod "http://localhost:8080/api/schemes?category=INDEX"
 Start:
 
 1. Oracle 19c and the configured PDB.
-2. Apply the Phase 3 migration if needed.
+2. Apply required database migrations if needed, including the Phase 8
+   migration for existing databases.
 3. Start the Spring Boot backend using the command above.
 4. Start the frontend using [frontend/README.md](../frontend/README.md) and
    open `http://localhost:5173`.

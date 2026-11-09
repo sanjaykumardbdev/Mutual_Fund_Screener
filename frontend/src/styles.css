@@ -279,3 +279,56 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   .history-heading { align-items: flex-start; flex-direction: column; }
   .nav-history-header,.nav-history-row { grid-template-columns: .9fr 1fr .8fr; gap: 5px; padding-right: 4px; padding-left: 4px; font-size: 9px; }
 }
+
+.sync-banner { display: flex; align-items: center; gap: 9px; min-height: 34px; margin: -20px 0 18px; padding: 7px 10px; border: 1px solid #dcebe1; border-radius: 7px; background: #f0f7f2; color: #426950; font-size: 10px; }
+.sync-banner.offline { border-color: #efdfc3; background: #fff8eb; color: #8a6531; }
+.sync-status-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #60a476; }
+.sync-banner.offline .sync-status-dot { background: #d99a3f; }
+.sync-banner-message { color: #78867d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.portfolio-page { display: grid; gap: 17px; }
+.portfolio-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; }
+.portfolio-metric { display: grid; align-content: center; gap: 7px; min-width: 0; min-height: 91px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.portfolio-metric span { color: #87938a; font-size: 10px; }
+.portfolio-metric strong { overflow: hidden; color: #2e4638; font: 700 18px var(--serif); text-overflow: ellipsis; white-space: nowrap; }
+.portfolio-metric small { color: #8b978e; font-size: 9px; }
+.portfolio-disclaimer { margin: -8px 0 0; color: #89948c; font-size: 9px; line-height: 1.6; }
+.portfolio-section { min-width: 0; padding: 17px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.section-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.section-title > div { display: grid; gap: 5px; }
+.section-title h2 { margin: 0; color: #35463c; font: 700 15px var(--serif); }
+.section-title span { color: #8b968e; font-size: 9px; }
+.portfolio-table-wrap { overflow-x: auto; }
+.portfolio-table { width: 100%; border-collapse: collapse; text-align: left; }
+.portfolio-table th { padding: 9px 10px; color: #8c978f; font-size: 9px; font-weight: 600; white-space: nowrap; }
+.portfolio-table td { padding: 11px 10px; border-top: 1px solid #eff2ef; color: #536157; font-size: 10px; white-space: nowrap; }
+.portfolio-table td:first-child { min-width: 190px; white-space: normal; }
+.portfolio-table td strong,.portfolio-table td span { display: block; }
+.portfolio-table td strong { color: #3a4b41; font-size: 10px; }
+.portfolio-table td span { margin-top: 4px; color: #929d95; font-size: 9px; }
+.portfolio-forms { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.data-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.data-form label,.preferences-form label { display: grid; gap: 5px; color: #718077; font-size: 9px; font-weight: 600; }
+.data-form input,.data-form select,.preferences-form select { width: 100%; min-width: 0; height: 35px; padding: 0 8px; border: 1px solid #e3e9e4; border-radius: 5px; background: #fff; color: #405047; font-size: 10px; }
+.data-form > button { align-self: end; min-height: 35px; }
+.sip-form { margin-top: 14px; padding-top: 14px; border-top: 1px solid #edf0ed; }
+.sip-row { display: flex; align-items: center; gap: 9px; min-height: 50px; border-top: 1px solid #eff2ef; }
+.sip-row > div { display: grid; flex: 1; min-width: 0; gap: 4px; }
+.sip-row strong { overflow: hidden; color: #45554b; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.sip-row span { color: #89948c; font-size: 9px; }
+.sync-preferences { margin-bottom: 6px; }
+.preferences-form { display: flex; align-items: end; gap: 12px; }
+.preferences-form label { flex: 1; }
+
+@media (max-width: 1100px) {
+  .portfolio-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .portfolio-forms { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .sync-banner { margin-top: -7px; }
+  .sync-banner-message { white-space: normal; }
+  .portfolio-summary { gap: 8px; }
+  .portfolio-metric { min-height: 79px; padding: 10px; }
+  .portfolio-metric strong { font-size: 15px; }
+  .portfolio-section { padding: 13px 10px; }
+  .preferences-form { align-items: stretch; flex-direction: column; }
+}

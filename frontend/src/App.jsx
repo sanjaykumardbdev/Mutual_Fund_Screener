@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api.js";
+import { calculatePortfolioTotals } from "./portfolioMath.js";
 
 const CATEGORIES = [
   ["", "All categories"],
@@ -99,6 +100,213 @@ function FundDetailsModal({ details, history, loading, range, onRangeChange, onC
       </section>
     </div>
   );
+}
+
+function PortfolioView({ portfolio, sips, onRefresh, onMessage, preferences, onSavePreferences }) {
+  const [schemes, setSchemes] = useState([]);
+  const [transactionType, setTransactionType] = useState("LUMPSUM");
+  const [investmentForm, setInvestmentForm] = useState({
+    schemeId: "", transactionDate: new Date().toISOString().slice(0, 10),
+    amount: "", nav: "", units: "", sipId: "",
+  });
+  const [sipForm, setSipForm] = useState({
+    schemeId: "", amount: "", frequency: "MONTHLY",
+    startDate: new Date().toISOString().slice(0, 10), endDate: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [refreshMinutes, setRefreshMinutes] = useState(preferences.refreshFrequencyMinutes);
+  const [cacheDays, setCacheDays] = useState(preferences.offlineCacheDays);
+  const totals = calculatePortfolioTotals(portfolio.holdings ?? []);
+
+  useEffect(() => {
+    api.schemes({ page: 0, size: 100 })
+      .then((result) => setSchemes(result.content))
+      .catch((error) => onMessage(error.message, "error"));
+  }, [onMessage]);
+
+  useEffect(() => {
+    setRefreshMinutes(preferences.refreshFrequencyMinutes);
+    setCacheDays(preferences.offlineCacheDays);
+  }, [preferences]);
+
+  async function submitInvestment(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const request = {
+        schemeId: Number(investmentForm.schemeId),
+        transactionType,
+        transactionDate: investmentForm.transactionDate,
+        amount: Number(investmentForm.amount),
+        clientRequestId: crypto.randomUUID(),
+        ...(transactionType === "IDCW" ? {} : {
+          nav: Number(investmentForm.nav),
+          units: Number(investmentForm.units),
+        }),
+        ...(transactionType === "SIP" ? { sipId: Number(investmentForm.sipId) } : {}),
+      };
+      const result = await api.addInvestment(request);
+      onMessage(result?.queuedOffline
+        ? "Investment saved offline and queued for secure synchronization."
+        : "Investment transaction recorded.");
+      setInvestmentForm((current) => ({ ...current, amount: "", nav: "", units: "", sipId: "" }));
+      await onRefresh();
+    } catch (error) {
+      onMessage(error.message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitSip(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await api.addSip({
+        schemeId: Number(sipForm.schemeId),
+        amount: Number(sipForm.amount),
+        frequency: sipForm.frequency,
+        startDate: sipForm.startDate,
+        ...(sipForm.endDate ? { endDate: sipForm.endDate } : {}),
+      });
+      onMessage("SIP plan created.");
+      setSipForm((current) => ({ ...current, amount: "" }));
+      await onRefresh();
+    } catch (error) {
+      onMessage(error.message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changeSipStatus(sip, status) {
+    try {
+      await api.updateSipStatus(sip.id, status);
+      onMessage(`SIP ${status.toLowerCase()}.`);
+      await onRefresh();
+    } catch (error) {
+      onMessage(error.message, "error");
+    }
+  }
+
+  async function savePreferences(event) {
+    event.preventDefault();
+    try {
+      await onSavePreferences({
+        refreshFrequencyMinutes: Number(refreshMinutes),
+        offlineCacheDays: Number(cacheDays),
+      });
+      onMessage("Synchronization preferences saved.");
+    } catch (error) {
+      onMessage(error.message, "error");
+    }
+  }
+
+  return (
+    <div className="portfolio-page">
+      <section className="portfolio-summary" aria-label="Portfolio performance">
+        <Metric label="Net contributions" value={formatNav(totals.totalInvested)} />
+        <Metric label="Current value" value={totals.currentValue == null ? "NAV unavailable" : formatNav(totals.currentValue)} />
+        <Metric label="Realized proceeds + IDCW" value={formatNav(totals.redemptionProceeds + totals.dividends)} />
+        <Metric label="Total gain / loss" value={totals.gainLoss == null ? "NAV unavailable" : formatNav(totals.gainLoss)}
+          detail={totals.returnPercent == null ? "Absolute return" : `${totals.returnPercent.toFixed(2)}% absolute return`} />
+      </section>
+      <p className="portfolio-disclaimer">Returns are ledger-based absolute returns: current value + redemption proceeds + IDCW payouts − contributions. They are not annualized and exclude taxes, fees, and external cash flows not recorded here.</p>
+
+      <section className="portfolio-section">
+        <div className="section-title"><div><h2>Holdings and performance</h2><span>Latest stored NAV values</span></div></div>
+        {(portfolio.holdings ?? []).length === 0 ? <div className="chart-empty">Record an investment to start tracking your portfolio.</div> : (
+          <div className="portfolio-table-wrap">
+            <table className="portfolio-table">
+              <thead><tr><th>Scheme</th><th>Units</th><th>Latest NAV</th><th>Current value</th><th>Gain / loss</th><th>Return</th></tr></thead>
+              <tbody>{portfolio.holdings.map((holding) => (
+                <tr key={holding.schemeId}>
+                  <td><strong>{holding.schemeName}</strong><span>{holding.houseName}</span></td>
+                  <td>{Number(holding.unitsHeld).toFixed(4)}</td>
+                  <td>{formatNav(holding.latestNav)}<span>{holding.latestNavDate ? formatDate(holding.latestNavDate) : "No NAV date"}</span></td>
+                  <td>{formatNav(holding.currentValue)}</td>
+                  <td>{formatNav(holding.gainLoss)}</td>
+                  <td>{holding.returnPercent == null ? "—" : `${Number(holding.returnPercent).toFixed(2)}%`}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <div className="portfolio-forms">
+        <section className="portfolio-section">
+          <div className="section-title"><div><h2>Record transaction</h2><span>Manual entry; no trades are executed</span></div></div>
+          <form className="data-form" onSubmit={submitInvestment}>
+            <label>Transaction type<select value={transactionType} onChange={(event) => {
+              setTransactionType(event.target.value);
+              setInvestmentForm((current) => ({ ...current, sipId: "" }));
+            }}>
+              <option value="LUMPSUM">Lump sum</option><option value="SIP">SIP installment</option>
+              <option value="REDEMPTION">Redemption</option><option value="IDCW">IDCW payout</option>
+            </select></label>
+            <label>Scheme<select required value={investmentForm.schemeId} onChange={(event) => setInvestmentForm({ ...investmentForm, schemeId: event.target.value })}>
+              <option value="">Select a scheme</option>{schemes.map((scheme) => <option key={scheme.id} value={scheme.id}>{scheme.name}</option>)}
+            </select></label>
+            {transactionType === "SIP" && <label>SIP plan<select required value={investmentForm.sipId} onChange={(event) => {
+              const sip = sips.find((item) => item.id === Number(event.target.value));
+              setInvestmentForm({ ...investmentForm, sipId: event.target.value, schemeId: sip ? String(sip.schemeId) : investmentForm.schemeId });
+            }}>
+              <option value="">Select a plan</option>{sips.filter((sip) => sip.status === "ACTIVE").map((sip) => <option key={sip.id} value={sip.id}>{sip.schemeName} · {formatNav(sip.amount)}/{sip.frequency.toLowerCase()}</option>)}
+            </select></label>}
+            <label>Date<input type="date" required value={investmentForm.transactionDate} onChange={(event) => setInvestmentForm({ ...investmentForm, transactionDate: event.target.value })} /></label>
+            <label>Amount (INR)<input type="number" min="0.01" step="0.01" required value={investmentForm.amount} onChange={(event) => setInvestmentForm({ ...investmentForm, amount: event.target.value })} /></label>
+            {transactionType !== "IDCW" && <>
+              <label>Transaction NAV<input type="number" min="0.000001" step="0.000001" required value={investmentForm.nav} onChange={(event) => setInvestmentForm({ ...investmentForm, nav: event.target.value })} /></label>
+              <label>Units<input type="number" min="0.000001" step="0.000001" required value={investmentForm.units} onChange={(event) => setInvestmentForm({ ...investmentForm, units: event.target.value })} /></label>
+            </>}
+            <button className="button button-primary" disabled={saving}>Save transaction</button>
+          </form>
+        </section>
+        <section className="portfolio-section">
+          <div className="section-title"><div><h2>SIP plans</h2><span>Track schedules; record installments separately</span></div></div>
+          {sips.map((sip) => (
+            <div className="sip-row" key={sip.id}>
+              <div><strong>{sip.schemeName}</strong><span>{formatNav(sip.amount)} · {sip.frequency} · {sip.status}</span></div>
+              {sip.status === "ACTIVE" && <button className="text-button" onClick={() => changeSipStatus(sip, "PAUSED")}>Pause</button>}
+              {sip.status === "PAUSED" && <button className="text-button" onClick={() => changeSipStatus(sip, "ACTIVE")}>Resume</button>}
+              {["ACTIVE", "PAUSED"].includes(sip.status) && <button className="add-link remove-link" onClick={() => changeSipStatus(sip, "CANCELLED")}>Cancel</button>}
+            </div>
+          ))}
+          <form className="data-form sip-form" onSubmit={submitSip}>
+            <label>Scheme<select required value={sipForm.schemeId} onChange={(event) => setSipForm({ ...sipForm, schemeId: event.target.value })}>
+              <option value="">Select a scheme</option>{schemes.map((scheme) => <option key={scheme.id} value={scheme.id}>{scheme.name}</option>)}
+            </select></label>
+            <label>Installment amount<input type="number" min="0.01" step="0.01" required value={sipForm.amount} onChange={(event) => setSipForm({ ...sipForm, amount: event.target.value })} /></label>
+            <label>Frequency<select value={sipForm.frequency} onChange={(event) => setSipForm({ ...sipForm, frequency: event.target.value })}>
+              <option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option><option value="QUARTERLY">Quarterly</option>
+            </select></label>
+            <label>Start date<input type="date" required value={sipForm.startDate} onChange={(event) => setSipForm({ ...sipForm, startDate: event.target.value })} /></label>
+            <label>End date (optional)<input type="date" value={sipForm.endDate} onChange={(event) => setSipForm({ ...sipForm, endDate: event.target.value })} /></label>
+            <button className="button button-secondary" disabled={saving}>Create SIP plan</button>
+          </form>
+        </section>
+      </div>
+
+      <section className="portfolio-section sync-preferences">
+        <div className="section-title"><div><h2>Offline and synchronization</h2><span>Cached data is stored only for this signed-in account on this browser.</span></div></div>
+        <form className="preferences-form" onSubmit={savePreferences}>
+          <label>Refresh interval<select value={refreshMinutes} onChange={(event) => setRefreshMinutes(event.target.value)}>
+            <option value="15">Every 15 minutes</option><option value="60">Every hour</option>
+            <option value="240">Every 4 hours</option><option value="1440">Daily</option>
+          </select></label>
+          <label>Offline cache retention<select value={cacheDays} onChange={(event) => setCacheDays(event.target.value)}>
+            <option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option>
+          </select></label>
+          <button className="button button-secondary">Save preferences</button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function Metric({ label, value, detail }) {
+  return <div className="portfolio-metric"><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</div>;
 }
 
 function initials(name = "") {
@@ -218,6 +426,17 @@ function App() {
   const [navHistory, setNavHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyRange, setHistoryRange] = useState("ALL");
+  const [online, setOnline] = useState(navigator.onLine);
+  const [usingCachedData, setUsingCachedData] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
+  const [pendingCount, setPendingCount] = useState(0);
+  const [portfolio, setPortfolio] = useState(null);
+  const [sips, setSips] = useState([]);
+  const [preferences, setPreferences] = useState({
+    refreshFrequencyMinutes: 60,
+    offlineCacheDays: 30,
+  });
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
 
   const filters = useMemo(() => ({
     houseCode: selectedHouse,
@@ -235,8 +454,16 @@ function App() {
       .then((currentUser) => {
         if (alive) setUser(currentUser);
       })
-      .catch(() => {
-        if (alive) setUser(null);
+      .catch((loadError) => {
+        const offlineUser = api.offlineIdentity();
+        if (alive && loadError.isNetworkError && offlineUser) {
+          api.configureOfflineUser(offlineUser.id);
+          setUser({ ...offlineUser, enabled: true, offline: true });
+          setUsingCachedData(true);
+          setSyncMessage("Offline mode. Cached data is available; queued changes sync after reconnecting.");
+        } else if (alive) {
+          setUser(null);
+        }
       })
       .finally(() => {
         if (alive) setAuthLoading(false);
@@ -274,6 +501,20 @@ function App() {
     }
   }, []);
 
+  const loadPortfolio = useCallback(async () => {
+    setPortfolioLoading(true);
+    try {
+      const [portfolioData, sipData] = await Promise.all([api.portfolio(), api.sips()]);
+      setPortfolio(portfolioData);
+      setSips(sipData);
+    } catch (loadError) {
+      setError(loadError.message);
+      if (loadError.message.includes("session has expired")) setUser(null);
+    } finally {
+      setPortfolioLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!user || activeView !== "explore") return;
     loadCatalog();
@@ -300,6 +541,99 @@ function App() {
   }, [user, activeView, loadWatchlist]);
 
   useEffect(() => {
+    if (!user) return;
+    let active = true;
+    Promise.all([api.preferences(), api.pendingMutations()])
+      .then(([nextPreferences, pending]) => {
+        if (!active) return;
+        setPreferences(nextPreferences);
+        api.configureOfflineUser(user.id, nextPreferences.offlineCacheDays);
+        setPendingCount(pending.length);
+      })
+      .catch((loadError) => {
+        if (active) setError(loadError.message);
+      });
+    return () => { active = false; };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || activeView !== "portfolio") return;
+    loadPortfolio();
+  }, [user, activeView, loadPortfolio]);
+
+  useEffect(() => {
+    const handleOffline = () => {
+      setOnline(false);
+      setUsingCachedData(true);
+      setSyncMessage("Offline mode. Changes will be synchronized when the connection returns.");
+    };
+    const handleOnline = async () => {
+      setOnline(true);
+      setUsingCachedData(false);
+      setSyncMessage("Synchronizing queued changes...");
+      try {
+        const result = await api.synchronize();
+        setPendingCount(result.pending);
+        if (result.blocked) {
+          setSyncMessage("Sign in again to synchronize your queued changes.");
+        } else if (result.synchronized) {
+          setSyncMessage(`${result.synchronized} queued change(s) synchronized.`);
+          await Promise.all([loadWatchlist(), loadCatalog(), loadPortfolio()]);
+          setDashboard(await api.navDashboard());
+        } else {
+          setSyncMessage(result.pending ? `${result.pending} change(s) waiting to sync.` : "");
+        }
+      } catch (syncError) {
+        setSyncMessage(syncError.message);
+      }
+    };
+    const handleCache = () => {
+      setUsingCachedData(true);
+      setSyncMessage("Backend unavailable. Displaying cached data.");
+    };
+    const handleOutbox = async () => {
+      setPendingCount((await api.pendingMutations()).length);
+    };
+    const handleStorageError = () => setSyncMessage("Browser offline storage is unavailable.");
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("fundwise:offline-cache", handleCache);
+    window.addEventListener("fundwise:outbox-changed", handleOutbox);
+    window.addEventListener("fundwise:offline-storage-error", handleStorageError);
+    return () => {
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("fundwise:offline-cache", handleCache);
+      window.removeEventListener("fundwise:outbox-changed", handleOutbox);
+      window.removeEventListener("fundwise:offline-storage-error", handleStorageError);
+    };
+  }, [loadCatalog, loadPortfolio, loadWatchlist]);
+
+  useEffect(() => {
+    if (!user || !online) return;
+    const synchronizeReads = async () => {
+      try {
+        await api.synchronize();
+        setPendingCount((await api.pendingMutations()).length);
+        setDashboard(await api.navDashboard());
+        if (activeView === "explore") await loadCatalog();
+        if (activeView === "watchlist") await loadWatchlist();
+        if (activeView === "portfolio") await loadPortfolio();
+      } catch (syncError) {
+        setSyncMessage(syncError.message);
+      }
+    };
+    const delay = Math.max(15, preferences.refreshFrequencyMinutes) * 60 * 1000;
+    const timer = window.setInterval(synchronizeReads, delay);
+    window.addEventListener("focus", synchronizeReads);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", synchronizeReads);
+    };
+  }, [user, online, activeView, preferences.refreshFrequencyMinutes,
+    loadCatalog, loadPortfolio, loadWatchlist]);
+
+  useEffect(() => {
     if (!toast) return undefined;
     const timeout = window.setTimeout(() => setToast(""), 2800);
     return () => window.clearTimeout(timeout);
@@ -310,14 +644,26 @@ function App() {
     setUser(authenticatedUser);
     setActiveView("explore");
     setError("");
+    setUsingCachedData(false);
+    setSyncMessage("");
   }
 
   async function logout() {
     setError("");
+    const pending = await api.pendingMutations();
+    if (pending.length && !window.confirm(
+      `${pending.length} offline change(s) have not synchronized. Signing out will discard them from this browser. Continue?`,
+    )) return;
     try {
-      await api.logout();
+      if (online) await api.logout();
+      await api.clearOfflineSession(user.id);
       setUser(null);
       setWatchlist([]);
+      setPortfolio(null);
+      setSips([]);
+      setPendingCount(0);
+      setUsingCachedData(false);
+      setSyncMessage("");
     } catch (logoutError) {
       setError(logoutError.message);
     }
@@ -340,9 +686,28 @@ function App() {
         setWatchlist((current) => current.filter((item) => item.schemeId !== scheme.id));
         setToast("Removed from your watchlist");
       } else {
-        await api.addWatchlist(scheme.id);
-        await loadWatchlist();
-        setToast("Added to your watchlist");
+        const result = await api.addWatchlist(scheme.id);
+        if (result?.queuedOffline) {
+          setWatchlist((current) => current.some((item) => item.schemeId === scheme.id) ? current : [
+            ...current,
+            {
+              schemeId: scheme.id,
+              schemeCode: scheme.code,
+              schemeName: scheme.name,
+              houseName: scheme.houseName,
+              category: scheme.category,
+              planType: scheme.planType,
+              optionType: scheme.optionType,
+              latestNavDate: null,
+              latestNav: null,
+              addedAt: new Date().toISOString(),
+            },
+          ]);
+          setToast("Saved offline; watchlist change is queued to sync.");
+        } else {
+          await loadWatchlist();
+          setToast("Added to your watchlist");
+        }
       }
     } catch (actionError) {
       setError(actionError.message);
@@ -427,6 +792,17 @@ function App() {
     }
   }
 
+  function showMessage(message, type = "success") {
+    if (type === "error") setError(message);
+    else setToast(message);
+  }
+
+  async function savePreferences(nextPreferences) {
+    const saved = await api.updatePreferences(nextPreferences);
+    setPreferences(saved);
+    api.configureOfflineUser(user.id, saved.offlineCacheDays);
+  }
+
   if (authLoading) {
     return <div className="startup-screen"><Brand /><span>Connecting to your account...</span></div>;
   }
@@ -471,6 +847,13 @@ function App() {
             <span>My watchlist</span>
             <span className="nav-count">{watchlist.length}</span>
           </button>
+          <button
+            className={`nav-item ${activeView === "portfolio" ? "active" : ""}`}
+            onClick={() => { setActiveView("portfolio"); setError(""); }}
+          >
+            <PortfolioIcon />
+            <span>Portfolio</span>
+          </button>
           <div className="sidebar-bottom">
             <div className="help-card">
               <span className="help-icon">i</span>
@@ -484,13 +867,22 @@ function App() {
         </aside>
 
         <main className="main-content">
+          {(usingCachedData || !online || pendingCount > 0) && (
+            <div className={`sync-banner ${!online ? "offline" : ""}`} role="status">
+              <span className="sync-status-dot" />
+              <span>{!online ? "Offline" : pendingCount ? `${pendingCount} pending` : "Cached mode"}</span>
+              <span className="sync-banner-message">{syncMessage || (pendingCount ? "Queued changes will sync automatically." : "Showing saved browser data.")}</span>
+            </div>
+          )}
           <div className="page-heading">
             <div>
-              <div className="eyebrow">{activeView === "explore" ? "DISCOVER & SELECT" : "YOUR SAVED FUNDS"}</div>
-              <h1>{activeView === "explore" ? "Fund explorer" : "My watchlist"}</h1>
+              <div className="eyebrow">{activeView === "explore" ? "DISCOVER & SELECT" : activeView === "portfolio" ? "YOUR INVESTMENTS" : "YOUR SAVED FUNDS"}</div>
+              <h1>{activeView === "explore" ? "Fund explorer" : activeView === "portfolio" ? "Investment portfolio" : "My watchlist"}</h1>
               <p>{activeView === "explore"
                 ? "Find a scheme that fits your research. Add it to your personal watchlist."
-                : "Your selected schemes, gathered in one place."}</p>
+                : activeView === "portfolio"
+                  ? "Track contributions, holdings, SIP schedules, and ledger-based returns."
+                  : "Your selected schemes, gathered in one place."}</p>
             </div>
             {activeView === "explore" && (
               <div className="heading-market"><span className="heading-india">IN</span><div><span>Market</span><strong>India</strong></div></div>
@@ -521,7 +913,20 @@ function App() {
             </div>
           )}
 
-          {activeView === "explore" ? (
+          {activeView === "portfolio" ? (
+            portfolioLoading || !portfolio ? (
+              <div className="loading-panel"><span className="spinner" /> Loading portfolio...</div>
+            ) : (
+              <PortfolioView
+                portfolio={portfolio}
+                sips={sips}
+                onRefresh={loadPortfolio}
+                onMessage={showMessage}
+                preferences={preferences}
+                onSavePreferences={savePreferences}
+              />
+            )
+          ) : activeView === "explore" ? (
             <>
               <section className="filter-panel" aria-label="Fund filters">
                 <div className="filter-top">
@@ -745,6 +1150,10 @@ function ChevronIcon() {
 
 function LogoutIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H5.8A1.8 1.8 0 0 0 4 5.8v12.4A1.8 1.8 0 0 0 5.8 20H10M14 8l4 4-4 4M8 12h10" /></svg>;
+}
+
+function PortfolioIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h17M7 15l4-4 3 2 6-7" /><circle cx="20" cy="6" r="1" /></svg>;
 }
 
 function RefreshIcon() {

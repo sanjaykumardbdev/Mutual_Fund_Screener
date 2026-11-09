@@ -190,6 +190,7 @@ CREATE TABLE user_investments (
     transaction_nav     NUMBER(18, 6),
     transaction_amount  NUMBER(18, 2) NOT NULL,
     units               NUMBER(18, 6) NOT NULL,
+    client_request_id   VARCHAR2(36),
     remarks              VARCHAR2(500),
     created_at          TIMESTAMP(6) DEFAULT SYSTIMESTAMP NOT NULL,
     updated_at          TIMESTAMP(6) DEFAULT SYSTIMESTAMP NOT NULL,
@@ -356,6 +357,7 @@ CREATE INDEX ix_user_sip_scheme ON user_sip_details (scheme_id);
 CREATE INDEX ix_investments_user_date ON user_investments (user_id, transaction_date);
 CREATE INDEX ix_investments_scheme ON user_investments (scheme_id);
 CREATE INDEX ix_investments_sip_owner_scheme ON user_investments (sip_id, user_id, scheme_id);
+CREATE UNIQUE INDEX ux_investments_client_request ON user_investments (user_id, client_request_id);
 CREATE INDEX ix_alerts_user_active ON user_nav_alerts (user_id, is_active);
 CREATE INDEX ix_alerts_scheme ON user_nav_alerts (scheme_id);
 CREATE INDEX ix_login_audit_user_time ON user_login_audit (user_id, event_at);

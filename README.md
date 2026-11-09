@@ -8,7 +8,11 @@ authentication, role/permission management, and user-scoped watchlists and
 investments. **Phase 4** adds the React fund explorer and personal watchlist.
 **Phase 5** imports mapped daily NAV records from AMFI and retains dated
 history. **Phase 6** adds NAV dashboard metrics, per-scheme details/history,
-and an admin-triggered refresh control.
+and an admin-triggered refresh control. **Phase 7** adds a service-worker app
+shell, user-scoped browser data cache, queued offline watchlist/investment
+changes, and automatic reconnect/interval synchronization. **Phase 8** adds
+user-scoped holdings, manual investment transactions, SIP plan management,
+and ledger-based return analytics.
 
 ## Run locally (Windows)
 

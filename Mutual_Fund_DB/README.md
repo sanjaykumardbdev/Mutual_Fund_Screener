@@ -17,6 +17,8 @@ folders.
   records, and duplicate/orphan conditions.
 - `03_phase3_security_migration.sql` - one-time additive migration for existing
   databases to add the admin-managed permission override policy.
+- `04_phase8_offline_investment_migration.sql` - one-time additive migration
+  for existing databases to add the investment request idempotency key/index.
 - NAV mappings, history, refresh logs, and provider logs are part of the
   Phase 1 schema; Phase 5/6 use these existing tables without a new migration.
 - `architecture.md` - architecture and ER diagram plus key data rules.
@@ -96,8 +98,8 @@ partially created objects. Do not drop a schema containing data.
 
 ## Run the application locally
 
-After installing the schema (and applying the Phase 3 migration once if this
-is an older database), start the local application services:
+After installing the schema (and applying the Phase 3 and Phase 8 migrations
+once if this is an older database), start the local application services:
 
 1. Start Oracle 19c and open the PDB.
 2. Start the Spring Boot backend following the

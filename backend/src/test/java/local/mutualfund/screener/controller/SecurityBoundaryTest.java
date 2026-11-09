@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.List;
 import local.mutualfund.screener.config.SecurityConfig;
 import local.mutualfund.screener.dto.AuthDtos.WatchlistItem;
+import local.mutualfund.screener.dto.AuthDtos.PortfolioResponse;
 import local.mutualfund.screener.service.HealthService;
 import local.mutualfund.screener.security.AppUserDetailsService;
 import local.mutualfund.screener.security.AppUserPrincipal;
@@ -125,5 +126,23 @@ class SecurityBoundaryTest {
                 .andExpect(status().isNoContent());
 
         verify(userDataService).addToWatchlist(42L, 1L);
+    }
+
+    @Test
+    void portfolioIsScopedToAuthenticatedUserAndRequiresInvestmentPermission() throws Exception {
+        var principal = new AppUserPrincipal(42L, "alice", "hash", true, true, List.of("USER"));
+        when(permissionService.hasPermission(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("INVESTMENT_MANAGE")
+        )).thenReturn(true);
+        when(userDataService.getPortfolio(42L)).thenReturn(new PortfolioResponse(
+                java.math.BigDecimal.ZERO, java.math.BigDecimal.ZERO,
+                java.math.BigDecimal.ZERO, java.math.BigDecimal.ZERO,
+                java.math.BigDecimal.ZERO, null, List.of()
+        ));
+
+        mockMvc.perform(get("/api/me/portfolio").with(user(principal)))
+                .andExpect(status().isOk());
+
+        verify(userDataService).getPortfolio(42L);
     }
 }
